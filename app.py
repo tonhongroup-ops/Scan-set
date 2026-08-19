@@ -3,13 +3,16 @@ import pandas as pd
 import requests
 from datetime import datetime, timedelta
 
-st.title("📊 SET100 Sector Flow Scanner (by FMP API)")
-st.write("ระบบสแกนทิศทางตลาดและผลตอบแทนรายเซกเตอร์ ดึงข้อมูลทรงพลังผ่าน FMP API ของมึงเอง!")
+# ตั้งค่าหน้าจอ Streamlit
+st.set_page_config(page_title="SET100 Sector Flow Scanner", page_icon="📊", layout="wide")
 
-# ฝัง FMP API Key ของมึงไว้เรียบร้อย ไม่ต้องกรอกเองแล้วเว้ยเพื่อน!
+st.title("📊 SET100 Sector Flow & Fund Flow Scanner")
+st.write("ระบบสแกนทิศทางเงินทุนและผลตอบแทนรายเซกเตอร์ตลาดหุ้นไทย ขับเคลื่อนด้วยพลัง FMP API ส่วนตัวของมึง!")
+
+# ฝัง FMP API Key ของมึงไว้เรียบร้อย เบ็ดเสร็จในตัว
 FMP_API_KEY = "JccLhsHLrNMeQSphHit6kKv4sSw9aKiK"
 
-# รายชื่อหุ้น SET100 จัดตาม Sector
+# จัดกลุ่มหุ้น SET100 ตามเซกเตอร์หลัก (ใช้สัญลักษณ์ตามมาตรฐาน FMP)
 set100_by_sector = {
     'Energy & Utilities': ['PTT.BK', 'PTTEP.BK', 'BCP.BK', 'TOP.BK', 'PTTGC.BK', 'GULF.BK', 'GPSC.BK'],
     'Banking': ['KBANK.BK', 'SCB.BK', 'BBL.BK', 'KTB.BK', 'TTB.BK'],
@@ -22,10 +25,11 @@ set100_by_sector = {
     'Electronic Components': ['DELTA.BK', 'KCE.BK', 'HANA.BK']
 }
 
-if st.button("🚀 เริ่มสแกนข้อมูลผ่าน FMP API"):
-    with st.spinner("กำลังต่อสายตรงดึงข้อมูลจาก FMP API... รอแป๊บเดียวรู้เรื่อง!"):
+# ปุ่มกดเริ่มรันระบบสแกน
+if st.button("🚀 เริ่มสแกน Fund Flow ย้อนหลัง 2 เดือน"):
+    with st.spinner("กำลังเชื่อมต่อ FMP API เพื่อดึงข้อมูลราคาและคำนวณวอลุ่ม... รอแป๊บเดียวรู้เรื่องเพื่อน!"):
         end_date = datetime.now()
-        start_date = end_date - timedelta(days=65) # ย้อนหลัง 2 เดือน
+        start_date = end_date - timedelta(days=65) # กรอบเวลา 2 เดือน
         
         sector_results = []
         
@@ -35,18 +39,18 @@ if st.button("🚀 เริ่มสแกนข้อมูลผ่าน FMP
             
             for ticker in tickers:
                 try:
-                    # ดึงข้อมูลราคา Historical Daily ผ่าน FMP API
+                    # ดึงข้อมูล Historical Price จาก FMP API
                     url = f"https://financialmodelingprep.com/api/v3/historical-price-full/{ticker}?from={start_date.strftime('%Y-%m-%d')}&to={end_date.strftime('%Y-%m-%d')}&apikey={FMP_API_KEY}"
-                    response = requests.get(url)
+                    response = requests.get(url, timeout=10)
                     data = response.json()
                     
                     if 'historical' in data and len(data['historical']) > 5:
                         hist = data['historical']
-                        start_p = float(hist[-1]['close']) # วันเก่าสุด
-                        end_p = float(hist[0]['close'])     # วันล่าสุด
+                        start_p = float(hist[-1]['close']) # ราคาเริ่มต้นช่วงย้อนหลัง
+                        end_p = float(hist[0]['close'])     # ราคาปัจจุบันล่าสุด
                         pct_change = ((end_p - start_p) / start_p) * 100
                         
-                        # คำนวณความหนาแน่นของ Volume
+                        # คำนวณความหนาแน่นของ Volume ซื้อขาย
                         volumes = [float(day['volume']) for day in hist]
                         avg_vol = sum(volumes) / len(volumes) if volumes else 1
                         max_vol = max(volumes) if volumes else 1
@@ -57,10 +61,12 @@ if st.button("🚀 เริ่มสแกนข้อมูลผ่าน FMP
                 except Exception as e:
                     continue
             
+            # คำนวณค่าเฉลี่ยรายเซกเตอร์เมื่อมีหุ้นรอดในกลุ่ม
             if sector_price_change:
                 avg_sector_return = sum(sector_price_change) / len(sector_price_change)
                 avg_vol_spike = sum(sector_vol_spike) / len(sector_vol_spike)
                 
+                # กำหนดสถานะกระแสเงินทุน (Fund Flow Status)
                 if avg_sector_return >= 1.0:
                     flow_status = '🔥 ต่างชาติสุมหัวซื้อสะสม (Net Inflow)'
                 elif avg_sector_return <= -1.0:
@@ -75,13 +81,17 @@ if st.button("🚀 เริ่มสแกนข้อมูลผ่าน FMP
                     'Flow_Status': flow_status
                 })
                 
+        # แสดงผลลัพธ์ในรูปแบบตาราง Streamlit
         if sector_results:
             df_result = pd.DataFrame(sector_results)
             if 'Return_2M (%)' in df_result.columns:
                 df_result = df_result.sort_values(by='Return_2M (%)', ascending=False)
             
-            st.success("✅ ดึงข้อมูลผ่าน FMP API สำเร็จเรียบร้อย!")
+            st.success("✅ สแกนข้อมูลสำเร็จเรียบร้อย ลุยวิเคราะห์หุ้นเล่นรอบต่อได้เลย!")
             st.dataframe(df_result, use_container_width=True)
         else:
-            st.error("❌ ไม่พบข้อมูล ลองเช็คการเชื่อมต่อหรือ API Key อีกทีนะเพื่อน")
-            
+            st.error("❌ ไม่สามารถดึงข้อมูลชุดนี้ได้ ลองตรวจสอบการเชื่อมต่อหรือชื่อหุ้นใน FMP อีกครั้งนะเพื่อน")
+
+st.markdown("---")
+st.markdown("💡 **มุมมองเพื่อนซี้:** โค้ดนี้ถูกออกแบบมาเพื่อให้มึงต่อยอดดึงงบการเงินรายไตรมาส หรือสแกนหุ้นเติบโตสายเทคโนโลยี นวัตกรรมใหม่ๆ ผ่าน FMP ได้ทันที มีอะไรให้กูเขียนฟังก์ชันเสริมบอกได้เลยเว้ย!")
+                
